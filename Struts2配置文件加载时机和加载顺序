@@ -1,0 +1,188 @@
+01	<filter>
+02	    <filter-name>struts2</filter-name>
+03	    <filter-class>
+04	        org.apache.struts2.dispatcher.FilterDispatcher            
+05	    </filter-class>
+06	</filter>
+07	<filter-mapping>
+08	    <filter-name>struts2</filter-name>
+09	    <url-pattern>/*</url-pattern>
+10	</filter-mapping>
+从上述web.xml的filter节中，我们可以看到struts2是在filter中定义了一个FilterDispatcher，用来拦截符合在filter-mapping中定义的url-pattern的所有url请求，然后将拦截到的url请求交给该FilterDispather处理，所以接下来我们将重点分析该filter，既然是一个过滤器，那么最重要的方法莫过于三个，分别是init(),doFilter(),destroy()，从三个方法的名称结合我们本次源码分析的任务，我们将重点分析init()方法，顾名思义，该方法进行struts2的初始化工作。
+
+经过上述的简单思考，我们接下来将进行具体的源码分析工作。
+
+源码分析
+和之前的源码分析工作一样，首先还是先下载struts2源码(版本为struts-2.3.12)，然后将其导入eclipse，方便查看分析。待一切准备工作就绪后，我们进行具体的分析工作。
+
+01	   /**
+02	     * Initializes the filter by creating a default dispatcher
+03	     * and setting the default packages for static resources.
+04	     *
+05	     * @param filterConfig The filter configuration
+06	     */
+07	    public void init(FilterConfig filterConfig) throws ServletException {
+08	        try {
+09	            this.filterConfig = filterConfig;
+10	 
+11	            initLogging();
+12	 
+13	            dispatcher = createDispatcher(filterConfig);
+14	            dispatcher.init();
+15	            dispatcher.getContainer().inject(this);
+16	 
+17	            staticResourceLoader.setHostConfig(new FilterHostConfig(filterConfig));
+18	        } finally {
+19	            ActionContext.setContext(null);
+20	        }
+21	    }
+从init()函数上面的注释可以看到，该方法是通过创建一个默认的dispatcher和设置默认的静态资源包来初始化该过滤器。
+
+从上述具体的处理流程我们可以看到，所有的初始化工作，应该都是在dispachter.init()方法中，所以接下来将重点分析该方法。
+
+01	    /**
+02	     * Load configurations, including both XML and zero-configuration strategies,
+03	     * and update optional settings, including whether to reload configurations and resource files.
+04	     */
+05	    public void init() {
+06	 
+07	        if (configurationManager == null) {
+08	            configurationManager = createConfigurationManager(BeanSelectionProvider.DEFAULT_BEAN_NAME);
+09	        }
+10	 
+11	        try {
+12	            init_FileManager();
+13	            init_DefaultProperties(); // [1]
+14	            init_TraditionalXmlConfigurations(); // [2]
+15	            init_LegacyStrutsProperties(); // [3]
+16	            init_CustomConfigurationProviders(); // [5]
+17	            init_FilterInitParameters() ; // [6]
+18	            init_AliasStandardObjects() ; // [7]
+19	 
+20	            Container container = init_PreloadConfiguration();
+21	            container.inject(this);
+22	            init_CheckWebLogicWorkaround(container);
+23	 
+24	            if (!dispatcherListeners.isEmpty()) {
+25	                for (DispatcherListener l : dispatcherListeners) {
+26	                    l.dispatcherInitialized(this);
+27	                }
+28	            }
+29	        } catch (Exception ex) {
+30	            if (LOG.isErrorEnabled())
+31	                LOG.error("Dispatcher initialization failed", ex);
+32	            throw new StrutsException(ex);
+33	        }
+34	    }
+从该函数的注释头部分我们可以看到，该方法是加载配置信息并更新可选择的配置(某些配置信息，虽然在前面已经配置了，但还是可以在后面的配置文件中对其进行覆盖操作)。从上述七个init_*函数，与我们本次源码分析目标相关的函数应该是init_DefaultProperties()、init_TraditionalXmlConfigurations()以及init_LegacyStrutsProperties()，接下来我们将一个个的加以分析：
+
+首先是init_DefaultProperties(),该函数定义如下：
+
+1	 private void init_DefaultProperties() {
+2	        configurationManager.addContainerProvider(new DefaultPropertiesProvider());
+3	    }
+01	/**
+02	 * Loads the default properties, separate from the usual struts.properties loading
+03	 */
+04	public class DefaultPropertiesProvider extends LegacyPropertiesConfigurationProvider {
+05	 
+06	    public void destroy() {
+07	    }
+08	 
+09	    public void init(Configuration configuration) throws ConfigurationException {
+10	    }
+11	 
+12	    public void register(ContainerBuilder builder, LocatableProperties props)
+13	            throws ConfigurationException {
+14	         
+15	        Settings defaultSettings = null;
+16	        try {
+17	            defaultSettings = new PropertiesSettings("org/apache/struts2/default");
+18	        } catch (Exception e) {
+19	            throw new ConfigurationException("Could not find or error in org/apache/struts2/default.properties", e);
+20	        }
+21	         
+22	        loadSettings(props, defaultSettings);
+23	    }
+24	 
+25	}
+以上可以看到，其处理的配置文件是:org/apache/struts2/default.properties
+
+其次是init_TraditionalXmlConfigurations(),该函数定义如下：
+
+01	    private void init_TraditionalXmlConfigurations() {
+02	        String configPaths = initParams.get("config");
+03	        if (configPaths == null) {
+04	            configPaths = DEFAULT_CONFIGURATION_PATHS;
+05	        }
+06	        String[] files = configPaths.split("\\s*[,]\\s*");
+07	        for (String file : files) {
+08	            if (file.endsWith(".xml")) {
+09	                if ("xwork.xml".equals(file)) {
+10	                    configurationManager.addContainerProvider(createXmlConfigurationProvider(file, false));
+11	                } else {
+12	                    configurationManager.addContainerProvider(createStrutsXmlConfigurationProvider(file, false, servletContext));
+13	                }
+14	            } else {
+15	                throw new IllegalArgumentException("Invalid configuration file name");
+16	            }
+17	        }
+18	    }
+1	 /**
+2	     * Provide list of default configuration files.
+3	     */
+4	    private static final String DEFAULT_CONFIGURATION_PATHS = "struts-default.xml,struts-plugin.xml,struts.xml";
+
+上述函数的处理流程是：
+
+如果configPaths为Null，则使用其默认值
+
+1	"struts-default.xml,struts-plugin.xml,struts.xml"
+然后根据[,]进行分割，得到三个文件名:struts-default.xml, struts-plugin.xml, struts.xml，并以此对这三个文件进行处理，如果文件名以*.xml结尾且不是xwork.xml，则调用函数
+
+1	configurationManager.addContainerProvider(createStrutsXmlConfigurationProvider(file, false, servletContext));
+从上述可以看到，所谓的struts-*.xml配置文件处理顺序，其实就是变量DEFAULT_CONFIGURATION_PATHS中，字符串定义的顺序。
+
+最后一个函数是init_LegacyStrutsProperties()，从函数名，我们可以简单的判断出，该函数是处理遗留下来的struts配置文件，其定义如下：
+
+1	    private void init_LegacyStrutsProperties() {
+2	        configurationManager.addContainerProvider(new LegacyPropertiesConfigurationProvider());
+3	    }
+01	       // Set default locale by lazily resolving the locale property as needed into a Locale object
+02	        builder.factory(Locale.class, new Factory() {
+03	            private Locale locale;
+04	 
+05	            public synchronized Object create(Context context) throws Exception {
+06	                if (locale == null) {
+07	                    String loc = context.getContainer().getInstance(String.class, StrutsConstants.STRUTS_LOCALE);
+08	                    if (loc != null) {
+09	                        StringTokenizer localeTokens = new StringTokenizer(loc, "_");
+10	                        String lang = null;
+11	                        String country = null;
+12	 
+13	                        if (localeTokens.hasMoreTokens()) {
+14	                            lang = localeTokens.nextToken();
+15	                        }
+16	 
+17	                        if (localeTokens.hasMoreTokens()) {
+18	                            country = localeTokens.nextToken();
+19	                        }
+20	                        locale = new Locale(lang, country);
+21	                    } else {
+22	                        if (LOG.isInfoEnabled()) {
+23	                            LOG.info("No locale define, substituting the default VM locale");
+24	                        }
+25	                        locale = Locale.getDefault();
+26	                    }
+27	                }
+28	                return locale;
+29	            }
+30	        });
+1	   /** The default locale for the Struts application */
+2	    public static final String STRUTS_LOCALE = "struts.locale";
+从上面的处理流程，我们可以看到，主要是加载配置文件struts.locale文件。
+
+总结
+从上述的源码分析，我们可以看到，struts2在处理配置文件的一个相对顺序为：
+
+default.properties -> struts-default.xml -> struts-plugins.xml -> struts.xml -> struts.locale
