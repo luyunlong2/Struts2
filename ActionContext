@@ -1,0 +1,76 @@
+--ServletActionContext和ActionContext的使用及区别
+一、ActionContext
+
+    是Action执行的上下文，Action的上下文可以看作是一个容器，里面封装了请求（Request）、会话（Session）、Application等，这里面的Request、Session、Application是Map类型的，往里面封装的是键值对，所以这就体现了struts2不与底层servlet Api打交道，那么对很多web的相关对象进行封装，这样可以达到Action与web层解耦。
+
+用ActionContext得到Map类型的Request、Session、Application。
+
+例子：
+
+    获取request：
+
+     Map request = ActionContext.getContext().get("request");
+
+    往request里封装数据
+
+    request.put("name", value);
+
+    在前台就可以用request.getAttribute("name");
+
+   
+
+    获取session
+
+    Map session = ActionContext.getContext().getSession();
+
+    将数据封装到session中
+
+    session.put("name", value);
+
+    在前台页面上用sessionScope.getAttribute("name");得到session里面封装的值。
+
+得到session、request有点区别，得到request用的是get("reqeust"),得到session用的是getSession()
+
+ 
+
+也可以直接对Java Servlet Http的请求（HttpServletRequest）、响应（HttpServletResponse）操作，和上面的例子有点区别，注意区别。
+
+ActionContext ctx = ActionContext.getContext();       
+      
+  HttpServletRequest request = (HttpServletRequest)ctx.get(ServletActionContext.HTTP_REQUEST);
+  HttpServletResponse response = (HttpServletResponse)ctx.get(ServletActionContext.HTTP_RESPONSE);
+
+用法就和Servlet中的request、response用法一样
+
+ 
+
+二、ServletActionContext
+
+它继承ActionContext，所以ServletActionContext也可以得到HttpServetRequest、HttpServletResponse，,它也提供了直接与Servlet相关对象访问的功能,它可以取得的对象有:
+
+(1)javax.servlet.http.HttpServletRequest : HTTPservlet请求对象
+
+(2)javax.servlet.http.HttpServletResponse : HTTPservlet相应对象
+
+(3)javax.servlet.ServletContext : Servlet上下文信息
+
+(4)javax.servlet.ServletConfig : Servlet配置对象
+
+(5)javax.servlet.jsp.PageContext : Http页面上下文
+
+ 
+
+如何获取HttpRequest、HttpResponse
+
+例子
+
+  HttpServletRequest request = ServletActionContext.getRequest();
+
+  HttpServletResponse response = ServletActionContext.getResponse();
+
+然后就可以用request.setAttribute("name", value)方法了。
+
+ 
+
+总结：不难看出，两者之间还是存在很多共同功能，那么我们还是根据自己的需求进行选择，能用ActionContext对象满足就尽量使用ActionContext，避免让我们直接去访问Servlet对象。另外，不要在Action还没实例化的时候去通过ActionContext调用方法，因为Action实例在ActionContext实例之前创建，ActionContext中一些值还没有设置，会返回null。
+
